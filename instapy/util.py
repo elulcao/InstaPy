@@ -1,7 +1,6 @@
 """ Common utilities """
 # import built-in & third-party modules
 import time
-import datetime
 import random
 import re
 import regex
@@ -25,6 +24,8 @@ from random import randint
 from contextlib import contextmanager
 from tempfile import gettempdir
 from argparse import ArgumentParser
+from datetime import datetime
+from datetime import timedelta
 
 from emoji.unicode_codes import UNICODE_EMOJI
 from selenium.webdriver.support.ui import WebDriverWait
@@ -508,75 +509,81 @@ def update_activity(
             with open(path, "w") as json_file:
                 json.dump(data, json_file, indent=4)
         except Exception:
-            logger.warn("Unable to update JSON state file")
+            logger.warning("Unable to update JSON state file")
 
     # in case is just a state update and there is no server call
     if action is None:
         return
 
-    # get a DB, start a connection and sum a server call
-    db, id = get_database()
-    conn = sqlite3.connect(db)
+    try:
+        # get a DB, start a connection and sum a server call
+        db, id = get_database()
+        conn = sqlite3.connect(db)
 
-    with conn:
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        # collect today data
-        cur.execute(
-            "SELECT * FROM recordActivity WHERE profile_id=:var AND "
-            "STRFTIME('%Y-%m-%d %H', created) == STRFTIME('%Y-%m-%d "
-            "%H', 'now', 'localtime')",
-            {"var": id},
-        )
-        data = cur.fetchone()
-
-        if data is None:
-            # create a new record for the new day
+        with conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            # collect today data
             cur.execute(
-                "INSERT INTO recordActivity VALUES "
-                "(?, 0, 0, 0, 0, 1, STRFTIME('%Y-%m-%d %H:%M:%S', "
-                "'now', 'localtime'))",
-                (id,),
+                "SELECT * FROM recordActivity WHERE profile_id=:var AND "
+                "STRFTIME('%Y-%m-%d %H', created) == "
+                "STRFTIME('%Y-%m-%d %H', 'now', 'localtime')",
+                {"var": id},
             )
+            data = cur.fetchone()
 
-        else:
-            # sqlite3.Row' object does not support item assignment -> so,
-            # convert it into a new dict
-            data = dict(data)
+            if data is None:
+                # create a new record for the new day
+                cur.execute(
+                    "INSERT INTO recordActivity VALUES "
+                    "(?, 0, 0, 0, 0, 1, STRFTIME('%Y-%m-%d %H:%M:%S', "
+                    "'now', 'localtime'))",
+                    (id,),
+                )
 
-            # update
-            data[action] += 1
-            quota_supervisor(action, update=True)
+            else:
+                # sqlite3.Row' object does not support item assignment -> so,
+                # convert it into a new dict
+                data = dict(data)
 
-            if action != "server_calls":
-                # always update server calls
-                data["server_calls"] += 1
-                quota_supervisor("server_calls", update=True)
+                # update
+                data[action] += 1
+                quota_supervisor(action, update=True)
 
-            sql = (
-                "UPDATE recordActivity set likes = ?, comments = ?, "
-                "follows = ?, unfollows = ?, server_calls = ?, "
-                "created = STRFTIME('%Y-%m-%d %H:%M:%S', 'now', "
-                "'localtime') "
-                "WHERE  profile_id=? AND STRFTIME('%Y-%m-%d %H', created) "
-                "== "
-                "STRFTIME('%Y-%m-%d %H', 'now', 'localtime')"
-            )
+                if action != "server_calls":
+                    # always update server calls
+                    data["server_calls"] += 1
+                    quota_supervisor("server_calls", update=True)
 
-            cur.execute(
-                sql,
-                (
-                    data["likes"],
-                    data["comments"],
-                    data["follows"],
-                    data["unfollows"],
-                    data["server_calls"],
-                    id,
-                ),
-            )
+                sql = (
+                    "UPDATE recordActivity set likes = ?, comments = ?, "
+                    "follows = ?, unfollows = ?, server_calls = ?, "
+                    "created = STRFTIME('%Y-%m-%d %H:%M:%S', 'now', "
+                    "'localtime') "
+                    "WHERE profile_id=? AND STRFTIME('%Y-%m-%d %H', created) "
+                    "== "
+                    "STRFTIME('%Y-%m-%d %H', 'now', 'localtime')"
+                )
 
-        # commit the latest changes
-        conn.commit()
+                cur.execute(
+                    sql,
+                    (
+                        data["likes"],
+                        data["comments"],
+                        data["follows"],
+                        data["unfollows"],
+                        data["server_calls"],
+                        id,
+                    ),
+                )
+
+            # commit the latest changes
+            conn.commit()
+
+    finally:
+        if conn:
+            # close the open connection
+            conn.close()
 
 
 def add_user_to_blacklist(username, campaign, action, logger, logfolder):
@@ -2103,10 +2110,10 @@ def truncate_float(number, precision, round=False):
 
 def get_time_until_next_month():
     """ Get total seconds remaining until the next month """
-    now = datetime.datetime.now()
+    now = datetime.now()
     next_month = now.month + 1 if now.month < 12 else 1
     year = now.year if now.month < 12 else now.year + 1
-    date_of_next_month = datetime.datetime(year, next_month, 1)
+    date_of_next_month = datetime(year, next_month, 1)
 
     remaining_seconds = (date_of_next_month - now).total_seconds()
 
@@ -2144,6 +2151,7 @@ def save_account_progress(browser, username, logger):
 
     # save profile total posts
     posts = getUserData("graphql.user.edge_owner_to_timeline_media.count", browser)
+    conn = None
 
     try:
         # DB instance
@@ -2163,16 +2171,19 @@ def save_account_progress(browser, username, logger):
     except Exception:
         logger.exception("message")
 
+    finally:
+        if conn:
+            # close the open connection
+            conn.close()
+
 
 def get_epoch_time_diff(time_stamp, logger):
     try:
         # time diff in seconds from input to now
-        log_time = datetime.datetime.strptime(time_stamp, "%Y-%m-%d %H:%M")
+        log_time = datetime.strptime(time_stamp, "%Y-%m-%d %H:%M")
 
-        former_epoch = (log_time - datetime.datetime(1970, 1, 1)).total_seconds()
-        cur_epoch = (
-            datetime.datetime.now() - datetime.datetime(1970, 1, 1)
-        ).total_seconds()
+        former_epoch = (log_time - datetime(1970, 1, 1)).total_seconds()
+        cur_epoch = (datetime.now() - datetime(1970, 1, 1)).total_seconds()
 
         return cur_epoch - former_epoch
     except ValueError:
@@ -2482,7 +2493,7 @@ def get_query_hash(browser, logger, edge_followed_by):
     if hash:
         return hash[0]
     else:
-        logger.warn("Query Hash not found")
+        logger.warning("Query Hash not found")
 
 
 def file_handling(file):
@@ -2500,6 +2511,150 @@ def file_handling(file):
         return ["FileNotFoundError"]
 
     return elements
+
+
+def block_on_likes_monitor(browser=None, logger=None):
+    """
+    Monitor if user is Block on likes. Check at least that last Block on likes
+    is 24h
+
+    Args:
+        :browser: web driver
+        :logger: library to log actions
+
+    Return:
+        :Boolean: True if user is block on likes, otherwise False
+    """
+    logger.info("- Check block on likes Monitor...")
+    conn = None
+    status = False
+    limit = 1440  # 24 hours
+    diff_date = 0
+
+    try:
+        curr_date = datetime.today().utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        db, id = get_database()
+        conn = sqlite3.connect(db)
+
+        with conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+
+            cur.execute(
+                "SELECT created, block FROM blockOnLikes WHERE profile_id=:var",
+                {"var": id},
+            )
+            data = cur.fetchone()
+
+            prev_date = dict(data)["created"] if data else None
+            block_state = dict(data)["block"] if data else None
+
+            if prev_date is not None:
+                start_date = datetime.strptime(curr_date, "%Y-%m-%d %H:%M:%S")
+                stop_date = datetime.strptime(prev_date, "%Y-%m-%d %H:%M:%S")
+                diff_date = abs((start_date - stop_date)) / timedelta(minutes=1)
+
+                # For making code and logs readable, couple of extra vars
+                hours, minutes = divmod(diff_date, 60)
+                time = "%02d:%02d" % (hours, minutes)
+
+                if diff_date < limit and block_state == 1:
+                    status = True
+                    logger.info(
+                        "- No more than 24 hrs have passed since the last check: [{}]".format(
+                            time
+                        )
+                    )
+                elif diff_date > limit and block_state == 1:
+                    # Here we are, clean some stuff
+                    update_block_on_likes_monitor(0, logger)
+                    logger.info("Deleting browser cookies...")
+                    browser.delete_all_cookies()
+
+                    logger.info(
+                        "- More than 24 hrs have passed since the last check: [{}]".format(
+                            time
+                        )
+                    )
+                else:
+                    logger.info("- Check block on likes Monitor: ok")
+            else:
+                # If this is the first time rows must be empty, so create
+                # new row with optimal state: 0 not blocked
+                update_block_on_likes_monitor(0, logger)
+
+                # No `created` record in DB, continue with normal operation
+                logger.info("- Missing date to monitor Block on Likes: ok")
+
+    except Exception:
+        # NF: start
+        logger.exception("message")
+        # NF: end
+
+    finally:
+        if conn:
+            # close the open connection
+            conn.close()
+        return status
+
+
+def update_block_on_likes_monitor(status: int = 0, logger=None):
+    """
+    Update Block on Likes monitor based on `Likes` activity. If user is already
+    blocked dont update the row for block value.
+
+    Args:
+        :status: 0 for not blocked and 1 for blocked
+        :logger: library to log actions
+
+    """
+
+    conn = None
+
+    try:
+        curr_date = datetime.today().utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        db, id = get_database()
+        conn = sqlite3.connect(db)
+
+        with conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+
+            # Set values by default if row for user ID does not exist
+            cur.execute(
+                "INSERT OR IGNORE INTO blockOnLikes (profile_id, created, block) "
+                "VALUES (?, strftime('%Y-%m-%d %H:%M:%S'), ?) ",
+                (id, 0),
+            )
+            conn.commit()
+
+            cur.execute(
+                "SELECT block FROM blockOnLikes WHERE profile_id=:var",
+                {"var": id},
+            )
+            data = cur.fetchone()
+            block_status = dict(data)["block"] if data else None
+
+            # Do not update twice or more the date to avoid resetting the date
+            if (block_status == 0 and status == 1) or (
+                block_status == 1 and status == 0
+            ):
+                cur.execute(
+                    "UPDATE blockOnLikes set created = ?, block = ? "
+                    "WHERE profile_id = ? ",
+                    (curr_date, status, id),
+                )
+                conn.commit()
+
+    except Exception:
+        # NF: start
+        logger.exception("message")
+        # NF: end
+
+    finally:
+        if conn:
+            # close the open connection
+            conn.close()
 
 
 class CustomizedArgumentParser(ArgumentParser):

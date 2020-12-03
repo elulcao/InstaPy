@@ -51,6 +51,13 @@ SQL_CREATE_ACCOUNTS_PROGRESS_TABLE = """
         CONSTRAINT `fk_accountsProgress_profiles1`
         FOREIGN KEY(`profile_id`) REFERENCES `profiles`(`id`));"""
 
+SQL_CREATE_BLOCK_ON_LIKES_TABLE = """
+    CREATE TABLE IF NOT EXISTS `blockOnLikes` (
+        `profile_id` INTEGER REFERENCES `profiles` (id),
+        `created` DATETIME NOT NULL,
+        `block` SMALLINT UNSIGNED NOT NULL,
+        UNIQUE(profile_id));"""
+
 
 def get_database(make=False):
     logger = Settings.logger
@@ -70,11 +77,13 @@ def get_database(make=False):
 
 
 def create_database(address, logger, name):
+    conn = None
+
     try:
-        connection = sqlite3.connect(address)
-        with connection:
-            connection.row_factory = sqlite3.Row
-            cursor = connection.cursor()
+        conn = sqlite3.connect(address)
+        with conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
 
             create_tables(
                 cursor,
@@ -85,10 +94,11 @@ def create_database(address, logger, name):
                     "shareWithPodsRestriction",
                     "commentRestriction",
                     "accountsProgress",
+                    "blockOnLikes",
                 ],
             )
 
-            connection.commit()
+            conn.commit()
 
     except Exception as exc:
         logger.warning(
@@ -98,9 +108,9 @@ def create_database(address, logger, name):
         )
 
     finally:
-        if connection:
+        if conn:
             # close the open connection
-            connection.close()
+            conn.close()
 
 
 def create_tables(cursor, tables):
@@ -122,6 +132,9 @@ def create_tables(cursor, tables):
     if "accountsProgress" in tables:
         cursor.execute(SQL_CREATE_ACCOUNTS_PROGRESS_TABLE)
 
+    if "accountsProgress" in tables:
+        cursor.execute(SQL_CREATE_BLOCK_ON_LIKES_TABLE)
+
 
 def verify_database_directories(address):
     db_dir = os.path.dirname(address)
@@ -141,6 +154,9 @@ def validate_database_address():
 
 
 def get_profile(name, address, logger):
+    conn = None
+    profile = None
+
     try:
         conn = sqlite3.connect(address)
         with conn:

@@ -64,6 +64,8 @@ from .util import get_cord_location
 from .util import get_bounding_box
 from .util import file_handling
 from .util import scroll_down
+from .util import block_on_likes_monitor
+from .util import update_block_on_likes_monitor
 from .unfollow_util import get_given_user_followers
 from .unfollow_util import get_given_user_following
 from .unfollow_util import unfollow
@@ -124,6 +126,7 @@ class InstaPy:
         geckodriver_path: str = None,
         split_db: bool = False,
         bypass_security_challenge_using: str = "email",
+        security_code=None,
         want_check_browser: bool = True,
         browser_executable_path: str = None,
         geckodriver_log_level: str = "info",  # "info" by default
@@ -158,6 +161,7 @@ class InstaPy:
         self.page_delay = page_delay
         self.disable_image_load = disable_image_load
         self.bypass_security_challenge_using = bypass_security_challenge_using
+        self.security_code = security_code
 
         # choose environment over static typed credentials
         self.username = os.environ.get("INSTA_USER") or username
@@ -273,6 +277,7 @@ class InstaPy:
         self.skip_no_profile_pic_percentage = 100
         self.skip_private_percentage = 100
         self.relationship_data = {username: {"all_following": [], "all_followers": []}}
+        self.block_counter = 0  # Internal only
 
         self.simulation = {"enabled": True, "percentage": 100}
 
@@ -413,6 +418,29 @@ class InstaPy:
 
     def login(self):
         """Used to login the user either with the username and password"""
+
+        # Check if there is a Block on Likes from previous session, if true
+        # skip this execution for the good sake.
+        # No restrictions if the user wants to continue, just remove the lock
+        # in the DB and move on...
+        if block_on_likes_monitor(self.browser, self.logger):
+            self.logger.info(
+                "- In the previous session a Block on Likes was activated..."
+            )
+            # We should abort the mission :( and try again latter.
+            # But I they want to move on, then it may be that the user just
+            # delete the workspace and start over. Instead we can try to delete
+            # the cookie after a 24 hour break; in an automated environment
+            # this would do more for us and protect the IG account a bit more.
+            # Cookies will be removed after 24 hour break.
+            #
+            # The usual banning time is 24 to 48 hours.
+            # Check https://socialpros.co/instagram-daily-limits#How_long_is_
+            # the_Instagram_UnFollow_ban_What_about_Instagram_Follow_and_like_ban
+
+            self.aborting = True
+            return self
+
         # InstaPy uses page_delay speed to implicit wait for elements,
         # here we're decreasing it to 5 seconds instead of the default 25
         # seconds to speed up the login process.
@@ -430,6 +458,7 @@ class InstaPy:
             self.logfolder,
             self.proxy_address,
             self.bypass_security_challenge_using,
+            self.security_code,
             self.want_check_browser,
         ):
             message = (
@@ -920,8 +949,8 @@ class InstaPy:
                 for commenter in commenters[:amount]:
                     if self.quotient_breach:
                         self.logger.warning(
-                            "--> Follow quotient reached its peak!"
-                            "\t~leaving Follow-Commenters activity\n"
+                            "--> Follow quotient reached its peak!\t~leaving "
+                            "Follow-Commenters activity\n"
                         )
                         break
 
@@ -1050,8 +1079,8 @@ class InstaPy:
                 for liker in likers[:follow_likers_per_photo]:
                     if self.quotient_breach:
                         self.logger.warning(
-                            "--> Follow quotient reached its peak!"
-                            "\t~leaving Follow-Likers activity\n"
+                            "--> Follow quotient reached its peak!\t~leaving "
+                            "Follow-Likers activity\n"
                         )
                         break
 
@@ -1448,6 +1477,9 @@ class InstaPy:
         if self.aborting:
             return self
 
+        message = "Starting to like by locations..."
+        highlight_print(self.username, message, "feature", "info", self.logger)
+
         liked_img = 0
         already_liked = 0
         inap_img = 0
@@ -1482,10 +1514,18 @@ class InstaPy:
                 continue
 
             for i, link in enumerate(links):
-                if self.jumps["consequent"]["likes"] >= self.jumps["limit"]["likes"]:
+                if (
+                    self.jumps["consequent"]["likes"] >= self.jumps["limit"]["likes"]
+                    or self.block_counter >= self.jumps["limit"]["likes"]
+                ):
+                    action = "Like"
+                    if self.block_counter >= self.jumps["limit"]["likes"]:
+                        action = "Block"
+                        update_block_on_likes_monitor(1, self.logger)
+
                     self.logger.warning(
-                        "--> Like quotient reached its peak!\t~leaving "
-                        "Like-By-Locations activity\n"
+                        "--> {} quotient reached its peak!\t~leaving "
+                        "Like-By-Locations activity\n".format(action)
                     )
                     self.quotient_breach = True
                     # reset jump counter after a breach report
@@ -1625,6 +1665,8 @@ class InstaPy:
                             already_liked += 1
 
                         elif msg == "block on likes":
+                            # Several "BLOCK on likes!" needs to be avoided
+                            self.block_counter += 1
                             break
 
                         elif msg == "jumped":
@@ -1868,6 +1910,9 @@ class InstaPy:
         if self.aborting:
             return self
 
+        message = "Starting to like by tags..."
+        highlight_print(self.username, message, "feature", "info", self.logger)
+
         liked_img = 0
         already_liked = 0
         inap_img = 0
@@ -1918,10 +1963,18 @@ class InstaPy:
                 continue
 
             for i, link in enumerate(links):
-                if self.jumps["consequent"]["likes"] >= self.jumps["limit"]["likes"]:
+                if (
+                    self.jumps["consequent"]["likes"] >= self.jumps["limit"]["likes"]
+                    or self.block_counter >= self.jumps["limit"]["likes"]
+                ):
+                    action = "Like"
+                    if self.block_counter >= self.jumps["limit"]["likes"]:
+                        action = "Block"
+                        update_block_on_likes_monitor(1, self.logger)
+
                     self.logger.warning(
-                        "--> Like quotient reached its peak!\t~leaving "
-                        "Like-By-Tags activity\n"
+                        "--> {} quotient reached its peak!\t~leaving "
+                        "Like-By-Tags activity\n".format(action)
                     )
                     self.quotient_breach = True
                     # reset jump counter after a breach report
@@ -2076,6 +2129,8 @@ class InstaPy:
                             already_liked += 1
 
                         elif msg == "block on likes":
+                            # Several "BLOCK on likes!" needs to be avoided
+                            self.block_counter += 1
                             break
 
                         elif msg == "jumped":
@@ -2093,13 +2148,12 @@ class InstaPy:
                     self.logger.error("Invalid Page: {}".format(err))
 
             self.logger.info("Tag: {}".format(tag.encode("utf-8")))
-
-        self.logger.info("Liked: {}".format(liked_img))
-        self.logger.info("Already Liked: {}".format(already_liked))
-        self.logger.info("Commented: {}".format(commented))
-        self.logger.info("Followed: {}".format(followed))
-        self.logger.info("Inappropriate: {}".format(inap_img))
-        self.logger.info("Not valid users: {}\n".format(not_valid_users))
+            self.logger.info("Liked: {}".format(liked_img))
+            self.logger.info("Already Liked: {}".format(already_liked))
+            self.logger.info("Commented: {}".format(commented))
+            self.logger.info("Followed: {}".format(followed))
+            self.logger.info("Inappropriate: {}".format(inap_img))
+            self.logger.info("Not valid users: {}\n".format(not_valid_users))
 
         self.liked_img += liked_img
         self.already_liked += already_liked
@@ -2120,6 +2174,9 @@ class InstaPy:
         """Likes some amounts of images for each usernames"""
         if self.aborting:
             return self
+
+        message = "Starting to like by users..."
+        highlight_print(self.username, message, "feature", "info", self.logger)
 
         if not isinstance(usernames, list):
             usernames = [usernames]
@@ -2209,7 +2266,7 @@ class InstaPy:
             # Reset like counter for every username
             liked_img = 0
 
-            for i, link in enumerate(links):
+            for _, link in enumerate(links):
                 # Check if target has reached
                 if liked_img >= amount:
                     self.logger.info("-------------")
@@ -2219,10 +2276,18 @@ class InstaPy:
                     )
                     break
 
-                if self.jumps["consequent"]["likes"] >= self.jumps["limit"]["likes"]:
+                if (
+                    self.jumps["consequent"]["likes"] >= self.jumps["limit"]["likes"]
+                    or self.block_counter >= self.jumps["limit"]["likes"]
+                ):
+                    action = "Like"
+                    if self.block_counter >= self.jumps["limit"]["likes"]:
+                        action = "Block"
+                        update_block_on_likes_monitor(1, self.logger)
+
                     self.logger.warning(
-                        "--> Like quotient reached its peak!\t~leaving "
-                        "Like-By-Users activity\n"
+                        "--> {} quotient reached its peak!\t~leaving "
+                        "Like-By-Users activity\n".format(action)
                     )
                     self.quotient_breach = True
                     # reset jump counter after a breach report
@@ -2321,6 +2386,8 @@ class InstaPy:
                             already_liked += 1
 
                         elif msg == "block on likes":
+                            # Several "BLOCK on likes!" needs to be avoided
+                            self.block_counter += 1
                             break
 
                         elif msg == "jumped":
@@ -2369,7 +2436,7 @@ class InstaPy:
         if self.aborting:
             return self
 
-        message = "Starting to interact by users.."
+        message = "Starting to interact by users..."
         highlight_print(self.username, message, "feature", "info", self.logger)
 
         if not isinstance(usernames, list):
@@ -2484,10 +2551,18 @@ class InstaPy:
             liked_img = 0
 
             for i, link in enumerate(links[:amount]):
-                if self.jumps["consequent"]["likes"] >= self.jumps["limit"]["likes"]:
+                if (
+                    self.jumps["consequent"]["likes"] >= self.jumps["limit"]["likes"]
+                    or self.block_counter >= self.jumps["limit"]["likes"]
+                ):
+                    action = "Like"
+                    if self.block_counter >= self.jumps["limit"]["likes"]:
+                        action = "Block"
+                        update_block_on_likes_monitor(1, self.logger)
+
                     self.logger.warning(
-                        "--> Like quotient reached its peak!\t~leaving "
-                        "Interact-By-Users activity\n"
+                        "--> {} quotient reached its peak!\t~leaving "
+                        "Interact-By-Users activity\n".format(action)
                     )
                     self.quotient_breach = True
                     # reset jump counter after a breach report
@@ -2606,6 +2681,8 @@ class InstaPy:
                                 already_liked += 1
 
                             elif msg == "block on likes":
+                                # Several "BLOCK on likes!" needs to be avoided
+                                self.block_counter += 1
                                 break
 
                             elif msg == "jumped":
@@ -2694,6 +2771,9 @@ class InstaPy:
         """Likes some amounts of tagged images for each usernames"""
         if self.aborting:
             return self
+
+        message = "Starting to interact by user tagged posts..."
+        highlight_print(self.username, message, "feature", "info", self.logger)
 
         if not isinstance(usernames, list):
             usernames = [usernames]
@@ -2799,10 +2879,18 @@ class InstaPy:
             liked_img = 0
 
             for i, link in enumerate(links[:amount]):
-                if self.jumps["consequent"]["likes"] >= self.jumps["limit"]["likes"]:
+                if (
+                    self.jumps["consequent"]["likes"] >= self.jumps["limit"]["likes"]
+                    or self.block_counter >= self.jumps["limit"]["likes"]
+                ):
+                    action = "Like"
+                    if self.block_counter >= self.jumps["limit"]["likes"]:
+                        action = "Block"
+                        update_block_on_likes_monitor(1, self.logger)
+
                     self.logger.warning(
-                        "--> Like quotient reached its peak!\t~leaving "
-                        "Interact-By-Users activity\n"
+                        "--> {} quotient reached its peak!\t~leaving "
+                        "Interact-By-Users activity\n".format(action)
                     )
                     self.quotient_breach = True
                     # reset jump counter after a breach report
@@ -2917,6 +3005,8 @@ class InstaPy:
                                 already_liked += 1
 
                             elif msg == "block on likes":
+                                # Several "BLOCK on likes!" needs to be avoided
+                                self.block_counter += 1
                                 break
 
                             elif msg == "jumped":
@@ -3103,8 +3193,8 @@ class InstaPy:
             for index, person in enumerate(person_list):
                 if self.quotient_breach:
                     self.logger.warning(
-                        "--> Like quotient reached its peak!"
-                        "\t~leaving Interact-User-Followers activity\n"
+                        "--> Like quotient reached its peak!\t~leaving "
+                        "Interact-User-Followers activity\n"
                     )
                     break
 
@@ -3278,8 +3368,8 @@ class InstaPy:
             for index, person in enumerate(person_list):
                 if self.quotient_breach:
                     self.logger.warning(
-                        "--> Like quotient reached its peak!"
-                        "\t~leaving Interact-User-Following activity\n"
+                        "--> Like quotient reached its peak!\t~leaving "
+                        "Interact-User-Following activity\n"
                     )
                     break
 
@@ -3456,8 +3546,8 @@ class InstaPy:
             for index, person in enumerate(person_list):
                 if self.quotient_breach:
                     self.logger.warning(
-                        "--> Follow quotient reached its peak!"
-                        "\t~leaving Follow-User-Followers activity\n"
+                        "--> Follow quotient reached its peak!\t~leaving "
+                        "Follow-User-Followers activity\n"
                     )
                     break
 
@@ -3642,8 +3732,8 @@ class InstaPy:
             for index, person in enumerate(person_list):
                 if self.quotient_breach:
                     self.logger.warning(
-                        "--> Follow quotient reached its peak!"
-                        "\t~leaving Follow-User-Following activity\n"
+                        "--> Follow quotient reached its peak!\t~leaving "
+                        "Follow-User-Following activity\n"
                     )
                     break
 
@@ -3899,6 +3989,9 @@ class InstaPy:
         if self.aborting:
             return
 
+        message = "Starting to like by feed..."
+        highlight_print(self.username, message, "feature", "info", self.logger)
+
         liked_img = 0
         already_liked = 0
         inap_img = 0
@@ -3946,10 +4039,18 @@ class InstaPy:
                 if liked_img == amount:
                     break
 
-                if self.jumps["consequent"]["likes"] >= self.jumps["limit"]["likes"]:
+                if (
+                    self.jumps["consequent"]["likes"] >= self.jumps["limit"]["likes"]
+                    or self.block_counter >= self.jumps["limit"]["likes"]
+                ):
+                    action = "Like"
+                    if self.block_counter >= self.jumps["limit"]["likes"]:
+                        action = "Block"
+                        update_block_on_likes_monitor(1, self.logger)
+
                     self.logger.warning(
-                        "--> Like quotient reached its peak!"
-                        "\t~leaving Like-By-Feed activity\n"
+                        "--> {} quotient reached its peak!\t~leaving "
+                        "Like-By-Feed activity\n".format(action)
                     )
                     self.quotient_breach = True
                     # reset jump counter after a breach report
@@ -4132,6 +4233,8 @@ class InstaPy:
                                     already_liked += 1
 
                                 elif msg == "block on likes":
+                                    # Several "BLOCK on likes!" needs to be avoided
+                                    self.block_counter += 1
                                     break
 
                                 elif msg == "jumped":
@@ -4506,8 +4609,8 @@ class InstaPy:
                     >= self.jumps["limit"]["follows"]
                 ):
                     self.logger.warning(
-                        "--> Follow quotient reached its peak!"
-                        "\t~leaving Follow-By-Locations activity\n"
+                        "--> Follow quotient reached its peak!\t~leaving "
+                        "Follow-By-Locations activity\n"
                     )
                     self.quotient_breach = True
                     # reset jump counter after a breach report
@@ -4638,8 +4741,8 @@ class InstaPy:
                     >= self.jumps["limit"]["follows"]
                 ):
                     self.logger.warning(
-                        "--> Follow quotient reached its peak!"
-                        "\t~leaving Follow-By-Tags activity\n"
+                        "--> Follow quotient reached its peak!\t~leaving "
+                        "Follow-By-Tags activity\n"
                     )
                     self.quotient_breach = True
                     # reset jump counter after a breach report
@@ -4756,10 +4859,18 @@ class InstaPy:
         not_valid_users = 0
 
         for index, url in enumerate(urls):
-            if self.jumps["consequent"]["likes"] >= self.jumps["limit"]["likes"]:
+            if (
+                self.jumps["consequent"]["likes"] >= self.jumps["limit"]["likes"]
+                or self.block_counter >= self.jumps["limit"]["likes"]
+            ):
+                action = "Like"
+                if self.block_counter >= self.jumps["limit"]["likes"]:
+                    action = "Block"
+                    update_block_on_likes_monitor(1, self.logger)
+
                 self.logger.warning(
-                    "--> Like quotient reached its peak!"
-                    "\t~leaving Interact-By-URL activity\n"
+                    "--> {} quotient reached its peak!\t~leaving "
+                    "Interact-By-URL activity\n".format(action)
                 )
                 # reset jump counter before breaking the loop
                 self.jumps["consequent"]["likes"] = 0
@@ -4907,6 +5018,8 @@ class InstaPy:
                         already_liked += 1
 
                     elif msg == "block on likes":
+                        # Several "BLOCK on likes!" needs to be avoided
+                        self.block_counter += 1
                         break
 
                     elif msg == "jumped":
@@ -5069,6 +5182,7 @@ class InstaPy:
                 "\t|> REPLIED to {} comments\n"
                 "\t|> INAPPROPRIATE images: {}\n"
                 "\t|> NOT VALID users: {}\n"
+                "\t|> BLOCK on likes: {}\n"
                 "\t|> WATCHED {} story(ies)  |  WATCHED {} reel(s)\n"
                 "\n{}\n{}".format(
                     self.liked_img,
@@ -5081,6 +5195,7 @@ class InstaPy:
                     self.replied_to_comments,
                     self.inap_img,
                     self.not_valid_users,
+                    self.block_counter,
                     self.stories_watched,
                     self.reels_watched,
                     owner_relationship_info,
@@ -5216,7 +5331,8 @@ class InstaPy:
         """
         if self.aborting:
             return self
-        message = "Starting to interact by comments.."
+
+        message = "Starting to interact by comments..."
         highlight_print(self.username, message, "feature", "info", self.logger)
 
         if not isinstance(usernames, list):
@@ -5301,9 +5417,16 @@ class InstaPy:
                 elif (
                     self.jumps["consequent"]["comments"]
                     >= self.jumps["limit"]["comments"]
+                    or self.block_counter >= self.jumps["limit"]["likes"]
                 ):
+                    action = "Comment"
+                    if self.block_counter >= self.jumps["limit"]["likes"]:
+                        action = "Block"
+                        update_block_on_likes_monitor(1, self.logger)
+
                     self.logger.warning(
-                        "--> Comment quotient reached its peak!{}".format(leave_msg)
+                        "--> {} quotient reached its peak!\t~leaving "
+                        "Interact-By-Comments activity\n".format(action)
                     )
                     self.quotient_breach = True
                     # reset jump counter after a breach report
@@ -5384,6 +5507,8 @@ class InstaPy:
                     self.already_liked += 1
 
                 elif msg == "block on likes":
+                    # Several "BLOCK on likes!" needs to be avoided
+                    self.block_counter += 1
                     break
 
                 else:
@@ -5552,15 +5677,15 @@ class InstaPy:
 
         if self.liked_comments:
             # output results
-            self.logger.info("\tLiked comments: {}".format(liked_comments))
-            self.logger.info("\tReplied to comments: {}".format(replied_to_comments))
-            self.logger.info("\tLiked posts: {}".format(liked_img))
-            self.logger.info("\tAlready liked posts: {}".format(already_liked))
-            self.logger.info("\tCommented posts: {}".format(commented))
-            self.logger.info("\tFollowed users: {}".format(followed))
-            self.logger.info("\tAlready followed users: {}".format(already_followed))
-            self.logger.info("\tInappropriate posts: {}".format(inap_img))
-            self.logger.info("\tNot valid users: {}".format(not_valid_users))
+            self.logger.info("Liked comments: {}".format(liked_comments))
+            self.logger.info("Replied to comments: {}".format(replied_to_comments))
+            self.logger.info("Liked posts: {}".format(liked_img))
+            self.logger.info("Already liked posts: {}".format(already_liked))
+            self.logger.info("Commented posts: {}".format(commented))
+            self.logger.info("Followed users: {}".format(followed))
+            self.logger.info("Already followed users: {}".format(already_followed))
+            self.logger.info("Inappropriate posts: {}".format(inap_img))
+            self.logger.info("Not valid users: {}\n".format(not_valid_users))
 
     def is_mandatory_character(self, uchr):
         if self.aborting:
@@ -5806,6 +5931,9 @@ class InstaPy:
                             self.liked_img += 1
 
                         elif msg == "block on likes":
+                            # Several "BLOCK on likes!" needs to be avoided
+                            # TODO: Add informational message when limit reached
+                            self.block_counter += 1
                             break
 
                     commenting_restricted = comment_restriction(

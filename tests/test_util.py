@@ -1,11 +1,12 @@
 import unittest
+
 from instapy.util import evaluate_mandatory_words
 
 # Note: This file is using a different name scheme than existing tests
 # so that unittest can be run with -p *_tests.py to discover all compatible tests in the tests directory
 
 
-class UtilsTests(unittest.TestCase):
+class TestsUtil(unittest.TestCase):
     def setUp(self):
         pass
 

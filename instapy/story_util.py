@@ -1,16 +1,21 @@
+# import built-in & third-party modules
 import time
 import math
+import requests
+
 from random import randint
-from selenium.common.exceptions import NoSuchElementException
-from selenium.common.exceptions import WebDriverException
+
+# import InstaPy modules
+from .constants import USER_AGENT
 from .util import click_element
 from .util import web_address_navigator
 from .util import update_activity
 from .util import get_action_delay
-from .settings import Settings
 from .xpath import read_xpath
 
-import requests
+# import exceptions
+from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import WebDriverException
 
 
 def get_story_data(browser, elem, action_type, logger, simulate=False):
@@ -81,7 +86,7 @@ def get_story_data(browser, elem, action_type, logger, simulate=False):
 
         session.cookies.set(**all_args)
 
-    headers = {"User-Agent": Settings.user_agent, "X-Requested-With": "XMLHttpRequest"}
+    headers = {"User-Agent": USER_AGENT, "X-Requested-With": "XMLHttpRequest"}
 
     data = session.get(graphql_query_url, headers=headers)
     response = data.json()
@@ -111,7 +116,7 @@ def get_story_data(browser, elem, action_type, logger, simulate=False):
                         continue
                     else:
                         headers = {
-                            "User-Agent": Settings.user_agent,
+                            "User-Agent": USER_AGENT,
                             "X-CSRFToken": csrftoken,
                             "X-Requested-With": "XMLHttpRequest",
                             "Content-Type": "application/x-www-form-urlencoded",

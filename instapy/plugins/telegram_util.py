@@ -284,7 +284,7 @@ class InstaPyTelegramBot:
         except NetworkError:
             # handle other connection problems
             self.__logger.warning("TELEGRAM ERROR {} update={}".format(error, update))
-        except ChatMigrated as _:
+        except ChatMigrated:
             # the chat_id of a group has changed, use e.new_chat_id instead
             self.__logger.warning("TELEGRAM ERROR {} update={}".format(error, update))
         except TelegramError:

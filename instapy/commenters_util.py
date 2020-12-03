@@ -7,6 +7,12 @@ from time import sleep
 from datetime import datetime, timedelta
 import random
 import collections
+
+try:
+    collectionsABC = collections.abc
+except AttributeError:
+    collectionsABC = collections
+
 from operator import itemgetter
 from selenium.webdriver.common.keys import Keys
 
@@ -274,7 +280,7 @@ def extract_information(browser, username, daysold, max_pic, logger):
     # PREPARE THE USER LIST TO EXPORT
     # sorts the list by frequencies, so users who comment the most are at
     # the top
-    counter = collections.Counter(user_commented_total_list)
+    counter = collectionsABC.Counter(user_commented_total_list)
     com = sorted(counter.most_common(), key=itemgetter(1, 0), reverse=True)
     com = map(lambda x: [x[0]] * x[1], com)
     user_commented_total_list = [item for sublist in com for item in sublist]

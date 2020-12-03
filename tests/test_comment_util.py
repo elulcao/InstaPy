@@ -1,5 +1,6 @@
 import unittest
 import logging
+
 from instapy.comment_util import *
 
 # Note: This file is using a different name scheme than existing tests
@@ -25,7 +26,7 @@ class BrowserMock:
             raise ValueError("Unexpected script")
 
 
-class CommentsUtilTests(unittest.TestCase):
+class TestCommentUtil(unittest.TestCase):
     def setUp(self):
         pass
 

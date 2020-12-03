@@ -1,8 +1,8 @@
 """Module only used for the login part of the script"""
 # import built-in & third-party modules
 import pickle
+import random
 import socket
-import os
 import json
 
 from selenium.webdriver.common.action_chains import ActionChains
@@ -25,7 +25,7 @@ from selenium.common.exceptions import MoveTargetOutOfBoundsException
 
 
 def bypass_suspicious_login(
-    browser, logger, logfolder, bypass_security_challenge_using
+    browser, logger, logfolder, bypass_security_challenge_using, security_code=None
 ):
     """ Bypass suspicious loggin attempt verification. """
 
@@ -41,7 +41,7 @@ def bypass_suspicious_login(
                 read_xpath(bypass_suspicious_login.__name__, "bypass_with_sms_option")
             )
         except NoSuchElementException:
-            logger.warn(
+            logger.warning(
                 "Unable to choose ({}) option to bypass the challenge".format(
                     bypass_security_challenge_using.upper()
                 )
@@ -53,7 +53,7 @@ def bypass_suspicious_login(
                 read_xpath(bypass_suspicious_login.__name__, "bypass_with_email_option")
             )
         except NoSuchElementException:
-            logger.warn(
+            logger.warning(
                 "Unable to choose ({}) option to bypass the challenge".format(
                     bypass_security_challenge_using.upper()
                 )
@@ -77,23 +77,10 @@ def bypass_suspicious_login(
     logger.info('Check Instagram App for "Suspicious Login attempt" prompt')
     logger.info("A security code was sent to your {}".format(option_text))
 
-    security_code = None
-    try:
-        path = "{}state.json".format(logfolder)
-        data = {}
-        # check if file exists and has content
-        if os.path.isfile(path) and os.path.getsize(path) > 0:
-            # load JSON file
-            with open(path, "r") as json_file:
-                data = json.load(json_file)
-
-        # update connection state
-        security_code = data["challenge"]["security_code"]
-    except Exception:
-        logger.info("Security Code not present in {}state.json file".format(logfolder))
-
     if security_code is None:
-        security_code = input("Type the security code here: ")
+        code = input("Type the security code here: ")
+    else:
+        code = random.choice(security_code)
 
     security_code_field = browser.find_element_by_xpath(
         read_xpath(bypass_suspicious_login.__name__, "security_code_field")
@@ -103,7 +90,7 @@ def bypass_suspicious_login(
         ActionChains(browser)
         .move_to_element(security_code_field)
         .click()
-        .send_keys(security_code)
+        .send_keys(code)
         .perform()
     )
 
@@ -141,7 +128,7 @@ def bypass_suspicious_login(
                 logfolder=logfolder,
                 logger=logger,
             )
-            logger.warn(wrong_login_msg)
+            logger.warning(wrong_login_msg)
 
     except NoSuchElementException:
         # correct security code
@@ -168,14 +155,14 @@ def check_browser(browser, logfolder, logger, proxy_address):
             proxy_address is not None
             and socket.gethostbyname(proxy_address) != current_ip_info["ip"]
         ):
-            logger.warn("- Proxy is set, but it's not working properly")
-            logger.warn(
+            logger.warning("- Proxy is set, but it's not working properly")
+            logger.warning(
                 '- Expected Proxy IP is "{}", and the current IP is "{}"'.format(
                     proxy_address, current_ip_info["ip"]
                 )
             )
-            logger.warn("- Try again or disable the Proxy Address on your setup")
-            logger.warn("- Aborting connection...")
+            logger.warning("- Try again or disable the Proxy Address on your setup")
+            logger.warning("- Aborting connection...")
             return False
         else:
             logger.info("- Internet Connection Status: ok")
@@ -194,7 +181,7 @@ def check_browser(browser, logfolder, logger, proxy_address):
                 logger=logger,
             )
     except Exception:
-        logger.warn("- Internet Connection Status: error")
+        logger.warning("- Internet Connection Status: error")
         update_activity(
             browser,
             action=None,
@@ -209,7 +196,7 @@ def check_browser(browser, logfolder, logger, proxy_address):
     webdriver = browser.execute_script("return window.navigator.webdriver")
     logger.info("- window.navigator.webdriver response: {}".format(webdriver))
     if webdriver:
-        logger.warn("- Hide Selenium Extension: error")
+        logger.warning("- Hide Selenium Extension: error")
     else:
         logger.info("- Hide Selenium Extension: ok")
 
@@ -225,6 +212,7 @@ def login_user(
     logfolder,
     proxy_address,
     security_code_to_phone,
+    backup_codes,
     want_check_browser,
 ):
     """Logins the user with the given username and password"""
@@ -249,7 +237,7 @@ def login_user(
             browser.add_cookie(cookie)
             cookie_loaded = True
     except (WebDriverException, OSError, IOError):
-        logger.warn("Cookie file not found, creating cookie...")
+        logger.warning("Cookie file not found, creating cookie...")
 
     # force refresh after cookie load or check_authorization() will FAIL
     reload_webpage(browser)
@@ -267,7 +255,7 @@ def login_user(
     # if user is still not logged in, then there is an issue with the cookie
     # so go create a new cookie.
     if cookie_loaded:
-        logger.warn(
+        logger.warning(
             "Issue with cookie for user '{}'. Creating new cookie...".format(username)
         )
 
@@ -301,13 +289,13 @@ def login_user(
             read_xpath(login_user.__name__, "login_elem")
         )
     except NoSuchElementException:
-        logger.warn("Login A/B test detected! Trying another string...")
+        logger.warning("Login A/B test detected! Trying another string...")
         try:
             login_elem = browser.find_element_by_xpath(
                 read_xpath(login_user.__name__, "login_elem_no_such_exception")
             )
         except NoSuchElementException:
-            logger.warn("Could not pass the login A/B test. Trying last string...")
+            logger.warning("Could not pass the login A/B test. Trying last string...")
             try:
                 login_elem = browser.find_element_by_xpath(
                     read_xpath(login_user.__name__, "login_elem_no_such_exception_2")
@@ -400,7 +388,7 @@ def login_user(
             account_disabled = browser.find_element_by_xpath(
                 read_xpath(login_user.__name__, "account_disabled")
             )
-            logger.warn(account_disabled.text)
+            logger.warning(account_disabled.text)
             update_activity(
                 browser,
                 action=None,
@@ -422,7 +410,7 @@ def login_user(
                 "At the moment there isn't a phone number linked to your Instagram "
                 "account. Please, add a phone number to your account, and try again."
             )
-            logger.warn(challenge_warn_msg)
+            logger.warning(challenge_warn_msg)
             update_activity(
                 browser,
                 action=None,
@@ -455,7 +443,7 @@ def login_user(
         error_alert = browser.find_element_by_xpath(
             read_xpath(login_user.__name__, "error_alert")
         )
-        logger.warn(error_alert.text)
+        logger.warning(error_alert.text)
         update_activity(
             browser,
             action=None,

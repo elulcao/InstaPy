@@ -385,7 +385,7 @@ def get_comments_count(browser, logger):
         # media_edge_string = get_media_edge_comment_string(media)
         # comments_count = media[media_edge_string]["count"]
 
-    except Exception as e:
+    except Exception:
         try:
             comments_count = browser.execute_script(
                 "return window.__additionalData[Object.keys(window.__additionalData)[0]].data"
